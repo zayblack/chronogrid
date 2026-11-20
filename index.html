@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChronoGrid — Clock &amp; Timers</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Clock section -->
+    <header class="clock-section">
+      <div class="analog-wrap">
+        <div class="analog-clock" id="analogClock" aria-label="Analog clock">
+          <div class="tick" style="--i:0"></div><div class="tick" style="--i:1"></div>
+          <div class="tick" style="--i:2"></div><div class="tick" style="--i:3"></div>
+          <div class="tick" style="--i:4"></div><div class="tick" style="--i:5"></div>
+          <div class="tick" style="--i:6"></div><div class="tick" style="--i:7"></div>
+          <div class="tick" style="--i:8"></div><div class="tick" style="--i:9"></div>
+          <div class="tick" style="--i:10"></div><div class="tick" style="--i:11"></div>
+          <div class="numbers" id="clockNumbers"></div>
+          <div class="hand hour" id="hourHand"></div>
+          <div class="hand minute" id="minuteHand"></div>
+          <div class="hand second" id="secondHand"></div>
+          <div class="pin"></div>
+        </div>
+        <div class="timezone-label" id="timezoneLabel">Local time</div>
+      </div>
+      <div class="digital-wrap">
+        <div class="digital-time" id="digitalTime">--:--:--</div>
+        <div class="digital-date" id="digitalDate">----</div>
+        <div class="clock-controls">
+          <button class="btn small" id="hour12Btn" title="12-hour format">12h</button>
+          <button class="btn small active" id="hour24Btn" title="24-hour format">24h</button>
+          <button class="btn small" id="secondsBtn" title="Show/hide seconds">Seconds</button>
+          <select id="timezoneSelect" class="select small" aria-label="Timezone"></select>
+        </div>
+      </div>
+    </header>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <button class="btn primary" id="addTimerBtn">+ New Timer</button>
+        <button class="btn" id="addPresetBtn">+ Preset</button>
+        <button class="btn" id="startAllBtn">Start All</button>
+        <button class="btn" id="pauseAllBtn">Pause All</button>
+        <button class="btn" id="resetAllBtn">Reset All</button>
+        <button class="btn ghost" id="orderBtn" title="Reorder timers">Reorder</button>
+      </div>
+      <div class="toolbar-right">
+        <button class="btn ghost" id="themeBtn">Light mode</button>
+        <button class="btn ghost" id="fullscreenBtn">Fullscreen</button>
+        <button class="btn ghost" id="exportBtn">Export</button>
+        <button class="btn ghost" id="importBtn">Import</button>
+        <input type="file" id="importFile" accept="application/json" hidden>
+      </div>
+    </div>
+
+    <div class="filter-bar" id="filterBar">
+      <label class="filter-label">Filter groups:</label>
+      <div id="groupFilters" class="group-filters"></div>
+      <button class="btn tiny ghost" id="clearFilterBtn">Clear</button>
+    </div>
+
+    <!-- Timers grid -->
+    <main class="timers-grid" id="timersGrid"></main>
+    <div class="empty-state" id="emptyState" hidden>
+      <h2>No timers yet</h2>
+      <p>Click <strong>+ New Timer</strong> or <strong>+ Preset</strong> to get started.</p>
+    </div>
+
+    <!-- Timer editor modal -->
+    <div class="modal-backdrop" id="editorModal" hidden>
+      <div class="modal editor-modal" role="dialog" aria-modal="true" aria-labelledby="editorTitle">
+        <div class="modal-header">
+          <h2 id="editorTitle">Edit timer</h2>
+          <button class="icon-btn" id="editorClose" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="editor-grid">
+            <div class="editor-main">
+              <div class="field">
+                <label for="editLabel">Label</label>
+                <input type="text" id="editLabel" placeholder="e.g. Boil eggs">
+              </div>
+              <div class="field-row">
+                <div class="field"><label for="editHours">Hours</label><input type="number" id="editHours" min="0" max="999" value="0"></div>
+                <div class="field"><label for="editMinutes">Minutes</label><input type="number" id="editMinutes" min="0" max="999" value="5"></div>
+                <div class="field"><label for="editSeconds">Seconds</label><input type="number" id="editSeconds" min="0" max="999" value="0"></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><label for="editMode">Mode</label>
+                  <select id="editMode" class="select">
+                    <option value="down">Count down</option>
+                    <option value="up">Count up</option>
+                  </select>
+                </div>
+                <div class="field"><label for="editGroup">Group</label><input type="text" id="editGroup" list="groupList" placeholder="e.g. Work"><datalist id="groupList"></datalist></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><label for="editFontSize">Font size</label><input type="range" id="editFontSize" min="24" max="96" value="56" class="range"></div>
+                <div class="field"><label for="editProgress">Progress style</label>
+                  <select id="editProgress" class="select">
+                    <option value="ring">Ring</option>
+                    <option value="bar">Bar</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field"><label for="editColor">Accent color</label><input type="color" id="editColor" value="#5b8cff" class="color-input"></div>
+
+              <fieldset class="fieldset">
+                <legend>Display options</legend>
+                <label class="check"><input type="checkbox" id="editShowEnd"> Show end/start time</label>
+                <label class="check"><input type="checkbox" id="editShowProgress"> Show progress indicator</label>
+                <label class="check"><input type="checkbox" id="editShowControls" checked> Show card controls</label>
+              </fieldset>
+
+              <fieldset class="fieldset">
+                <legend>Behavior</legend>
+                <label class="check"><input type="checkbox" id="editAutoStart"> Auto-start on load</label>
+                <label class="check"><input type="checkbox" id="editAutoRestart"> Auto-restart when complete</label>
+                <label class="check"><input type="checkbox" id="editSnooze"> Allow snooze</label>
+                <div class="field"><label for="editSnoozeSec">Snooze duration (seconds)</label><input type="number" id="editSnoozeSec" min="1" max="3600" value="60"></div>
+                <div class="field"><label for="editAutoStartAt">Auto-start at time of day</label><input type="time" id="editAutoStartAt" class="time-input"></div>
+                <div class="field"><label for="editRepeat">Repeat schedule</label>
+                  <select id="editRepeat" class="select">
+                    <option value="none">None</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekdays">Weekdays</option>
+                    <option value="weekly">Weekly (same day)</option>
+                  </select>
+                </div>
+              </fieldset>
+            </div>
+            <div class="editor-side">
+              <fieldset class="fieldset">
+                <legend>Sound</legend>
+                <div class="field"><label for="editSound">Alarm sound</label>
+                  <select id="editSound" class="select">
+                    <option value="none">None</option>
+                    <option value="beep">Beep</option>
+                    <option value="chime">Chime</option>
+                    <option value="bell">Bell</option>
+                    <option value="alarm">Alarm</option>
+                  </select>
+                </div>
+                <div class="field"><label for="editVolume">Volume <span id="volumeVal">70%</span></label><input type="range" id="editVolume" min="0" max="100" value="70" class="range"></div>
+                <label class="check"><input type="checkbox" id="editRepeatSound"> Repeat sound until dismissed</label>
+                <label class="check"><input type="checkbox" id="editSpeak"> Voice announcement on complete</label>
+                <div class="field"><label for="editSpeakText">Voice text</label><input type="text" id="editSpeakText" placeholder="Timer {label} finished"></div>
+                <div class="field-row">
+                  <div class="field"><label for="editSpeakLang">Voice language</label><input type="text" id="editSpeakLang" value="en-US" class="time-input"></div>
+                  <div class="field"><label for="editSpeakRate">Rate</label><input type="number" id="editSpeakRate" min="0.1" max="3" step="0.1" value="1"></div>
+                </div>
+              </fieldset>
+              <fieldset class="fieldset">
+                <legend>Notifications &amp; title</legend>
+                <label class="check"><input type="checkbox" id="editNotify" checked> Desktop notification</label>
+                <label class="check"><input type="checkbox" id="editUpdateTitle" checked> Update tab title while running</label>
+              </fieldset>
+              <div class="field"><label for="editNotes">Notes</label><textarea id="editNotes" rows="3" placeholder="Optional notes..."></textarea></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn danger" id="editDelete">Delete timer</button>
+          <div class="spacer"></div>
+          <button class="btn ghost" id="editCancel">Cancel</button>
+          <button class="btn primary" id="editSave">Save timer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Preset browser modal -->
+    <div class="modal-backdrop" id="presetModal" hidden>
+      <div class="modal preset-modal" role="dialog" aria-modal="true" aria-labelledby="presetTitle">
+        <div class="modal-header">
+          <h2 id="presetTitle">Timer presets</h2>
+          <button class="icon-btn" id="presetClose" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <h3>Built-in</h3>
+          <div class="preset-list" id="presetBuiltIn"></div>
+          <h3>Custom</h3>
+          <div class="preset-list" id="presetCustom"></div>
+          <div class="preset-save">
+            <input type="text" id="newPresetName" placeholder="Preset name (saves current timer settings)">
+            <button class="btn" id="saveCurrentPreset">Save current timer as preset</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn ghost" id="presetCancel">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reorder modal -->
+    <div class="modal-backdrop" id="reorderModal" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="reorderTitle">
+        <div class="modal-header">
+          <h2 id="reorderTitle">Reorder timers</h2>
+          <button class="icon-btn" id="reorderClose" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body"><div class="reorder-list" id="reorderList"></div></div>
+        <div class="modal-footer"><button class="btn primary" id="reorderDone">Done</button></div>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast" hidden></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
