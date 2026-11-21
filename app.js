@@ -11,6 +11,8 @@ let soundContext = null;
 let soundLoopTimers = new Map();
 let lastTick = Date.now();
 let toastTimer = null;
+let inlineEdit = null;
+let dragId = null;
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
@@ -131,12 +133,72 @@ function fmt(sec) {
                : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+function parseDurationInput(raw) {
+  const parts = String(raw).trim().split(":");
+  if (parts.length < 1 || parts.length > 3 || parts.some(p => !/^\d+$/.test(p))) return null;
+  const total = parts.length === 1 ? Number(parts[0]) * 60
+    : parts.length === 2 ? Number(parts[0]) * 60 + Number(parts[1])
+    : Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]);
+  return Number.isFinite(total) ? Math.ceil(total) : null;
+}
+
+function startInlineEdit(timeEl, id) {
+  const t = getTimer(id);
+  if (!t || inlineEdit || timeEl.querySelector("input")) return;
+  const original = timeEl.textContent;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "time-input-inline";
+  input.value = fmt(t.duration);
+  input.title = "Minutes (e.g. 7), MM:SS or HH:MM:SS — Enter saves, Esc cancels";
+  input.setAttribute("aria-label", "Edit timer duration");
+  timeEl.replaceChildren(input);
+  inlineEdit = { id, input, timeEl, original };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finishInlineEdit(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finishInlineEdit(false); }
+  });
+  input.addEventListener("blur", () => finishInlineEdit(true));
+  input.focus();
+  input.select();
+}
+
+function finishInlineEdit(commit, gridWillRerender = false) {
+  if (!inlineEdit) return;
+  const { id, input, timeEl, original } = inlineEdit;
+  inlineEdit = null;
+  const raw = input.value;
+  const parsed = commit ? parseDurationInput(raw) : null;
+  const t = getTimer(id);
+  if (commit && t && parsed !== null) {
+    const duration = t.mode === "down" ? Math.max(1, parsed) : Math.max(0, parsed);
+    t.duration = duration;
+    t.remaining = t.mode === "down" ? duration : 0;
+    t.elapsed = 0;
+    t.finished = false;
+    t.endAt = t.running && t.mode === "down" ? Date.now() + duration * 1000 : null;
+    t.lastTriggered = "";
+    stopSound(id);
+    saveState();
+    if (timeEl.isConnected) timeEl.textContent = fmt(duration);
+    const card = document.querySelector(`.timer-card[data-id="${id}"]`);
+    if (card) card.classList.remove("finished");
+    if (!gridWillRerender) updateCard(t);
+    toast(`Duration set to ${fmt(duration)}`);
+  } else {
+    if (commit && raw.trim()) toast("Invalid duration — use minutes, MM:SS or HH:MM:SS");
+    if (timeEl.isConnected) timeEl.textContent = original;
+  }
+}
+
 function progressFraction(t) {
   if (t.duration <= 0) return 0;
   return t.mode === "down" ? t.remaining / t.duration : Math.min(1, t.elapsed / t.duration);
 }
 
 function renderTimers() {
+  if (inlineEdit) finishInlineEdit(true, true);
   const grid = $("timersGrid");
   grid.innerHTML = "";
   const visible = state.timers.filter(t => !filterGroup || t.group === filterGroup);
@@ -155,7 +217,16 @@ function buildCard(t) {
   const accent = document.createElement("div"); accent.className = "card-accent"; card.appendChild(accent);
 
   const head = document.createElement("div"); head.className = "card-head";
-  const titleWrap = document.createElement("div");
+  const handle = document.createElement("button");
+  handle.type = "button";
+  handle.className = "drag-handle";
+  handle.textContent = "⠿";
+  handle.title = "Drag to reorder";
+  handle.setAttribute("aria-label", "Drag to reorder timer");
+  handle.addEventListener("pointerdown", () => { card.draggable = true; });
+  handle.addEventListener("pointerup", () => { card.draggable = false; });
+  handle.addEventListener("pointercancel", () => { card.draggable = false; });
+  const titleWrap = document.createElement("div"); titleWrap.className = "card-title";
   const label = document.createElement("div"); label.className = "card-label"; label.textContent = t.label || "Untitled";
   const group = document.createElement("div"); group.className = "card-group"; group.textContent = t.group ? `#${t.group}` : "No group";
   titleWrap.append(label, group);
@@ -164,7 +235,7 @@ function buildCard(t) {
   const savePresetBtn = mkIconBtn("★", "Save timer as preset", () => openPresets(t.id));
   const delBtn = mkIconBtn("🗑", "Delete timer", () => deleteTimer(t.id));
   menu.append(editBtn, savePresetBtn, delBtn);
-  head.append(titleWrap, menu); card.appendChild(head);
+  head.append(handle, titleWrap, menu); card.appendChild(head);
 
   const time = document.createElement("div"); time.className = "card-time"; time.dataset.role = "time";
   time.textContent = t.mode === "down" ? fmt(t.remaining) : fmt(t.elapsed); card.appendChild(time);
@@ -230,7 +301,7 @@ function updateCard(t) {
   const card = document.querySelector(`.timer-card[data-id="${t.id}"]`);
   if (!card) return;
   const time = card.querySelector('[data-role="time"]');
-  if (time) time.textContent = t.mode === "down" ? fmt(t.remaining) : fmt(t.elapsed);
+  if (time && !(inlineEdit && inlineEdit.timeEl === time)) time.textContent = t.mode === "down" ? fmt(t.remaining) : fmt(t.elapsed);
   const status = card.querySelector('[data-role="status"]');
   if (status) {
     status.textContent = t.finished ? "Finished" : t.running ? "Running" : "Paused";
@@ -290,6 +361,21 @@ function deleteTimer(id) {
   stopSound(id);
   state.timers = state.timers.filter(x => x.id !== id);
   renderTimers(); saveState();
+}
+
+function clearDropMarkers(grid) {
+  grid.querySelectorAll(".drop-before, .drop-after").forEach(el => el.classList.remove("drop-before", "drop-after"));
+}
+
+function moveTimerInState(id, targetId, after) {
+  const from = state.timers.findIndex(t => t.id === id);
+  if (from < 0) return;
+  const [item] = state.timers.splice(from, 1);
+  const targetIndex = targetId && targetId !== id ? state.timers.findIndex(t => t.id === targetId) : -1;
+  const to = targetIndex < 0 ? state.timers.length : targetIndex + (after ? 1 : 0);
+  state.timers.splice(to, 0, item);
+  saveState();
+  renderTimers();
 }
 
 /* ---------- Engine ---------- */
@@ -640,6 +726,52 @@ function initEvents() {
   $("importBtn").onclick = () => $("importFile").click();
   $("importFile").onchange = (e) => { if (e.target.files[0]) importState(e.target.files[0]); e.target.value = ""; };
   $("clearFilterBtn").onclick = () => { filterGroup = null; renderTimers(); };
+
+  const grid = $("timersGrid");
+  grid.addEventListener("dblclick", (e) => {
+    const timeEl = e.target.closest('[data-role="time"]');
+    if (!timeEl) return;
+    const card = timeEl.closest(".timer-card");
+    if (card) startInlineEdit(timeEl, card.dataset.id);
+  });
+  const cleanupDrag = () => {
+    dragId = null;
+    clearDropMarkers(grid);
+    grid.querySelectorAll(".timer-card").forEach(c => { c.classList.remove("dragging"); c.draggable = false; });
+  };
+  grid.addEventListener("dragstart", (e) => {
+    const card = e.target.closest(".timer-card");
+    if (!card || !card.draggable) { e.preventDefault(); return; }
+    dragId = card.dataset.id;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", dragId);
+    card.classList.add("dragging");
+  });
+  grid.addEventListener("dragover", (e) => {
+    if (!dragId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const card = e.target.closest(".timer-card");
+    clearDropMarkers(grid);
+    if (!card || card.dataset.id === dragId) return;
+    const rect = card.getBoundingClientRect();
+    card.classList.add(e.clientY > rect.top + rect.height / 2 ? "drop-after" : "drop-before");
+  });
+  grid.addEventListener("dragleave", (e) => {
+    if (!grid.contains(e.relatedTarget)) clearDropMarkers(grid);
+  });
+  grid.addEventListener("drop", (e) => {
+    if (!dragId) return;
+    e.preventDefault();
+    const card = e.target.closest(".timer-card");
+    if (card && card.dataset.id === dragId) { cleanupDrag(); return; }
+    const id = dragId;
+    const targetId = card ? card.dataset.id : null;
+    const after = !!card && card.classList.contains("drop-after");
+    cleanupDrag();
+    moveTimerInState(id, targetId, after);
+  });
+  grid.addEventListener("dragend", cleanupDrag);
   $("hour12Btn").onclick = () => { state.hour24 = false; saveState(); renderClock(); };
   $("hour24Btn").onclick = () => { state.hour24 = true; saveState(); renderClock(); };
   $("secondsBtn").onclick = () => { state.showSeconds = !state.showSeconds; saveState(); renderClock(); };

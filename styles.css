@@ -100,12 +100,22 @@ input[type="color"] { width: 100%; height: 38px; padding: 2px; background: var(-
 @keyframes pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--card-color, var(--accent)) 30%, transparent); } }
 .card-accent { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--card-color, var(--accent)); }
 .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.card-title { flex: 1; min-width: 0; }
+.drag-handle { background: transparent; border: none; color: var(--muted); cursor: grab; font-size: 18px; line-height: 1; padding: 2px 4px; border-radius: 4px; touch-action: none; user-select: none; }
+.drag-handle:hover { color: var(--text); background: var(--panel-2); }
+.drag-handle:active { cursor: grabbing; }
 .card-label { font-weight: 600; font-size: 15px; word-break: break-word; }
 .card-group { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .card-menu { display: flex; gap: 4px; }
 .card-menu button { background: transparent; border: none; color: var(--muted); cursor: pointer; padding: 2px 5px; font-size: 16px; border-radius: 4px; }
 .card-menu button:hover { color: var(--text); background: var(--panel-2); }
-.card-time { font-size: var(--card-font, 56px); font-weight: 200; text-align: center; font-variant-numeric: tabular-nums; letter-spacing: 1px; color: var(--card-color, var(--text)); line-height: 1.1; }
+.card-time { font-size: var(--card-font, 56px); font-weight: 200; text-align: center; font-variant-numeric: tabular-nums; letter-spacing: 1px; color: var(--card-color, var(--text)); line-height: 1.1; cursor: text; }
+.card-time:hover { text-decoration: underline dotted; text-decoration-color: var(--border); text-underline-offset: 6px; }
+.time-input-inline { width: 100%; background: var(--panel-2); color: var(--card-color, var(--text)); border: 1px solid var(--accent); border-radius: 8px; font: inherit; font-variant-numeric: tabular-nums; letter-spacing: inherit; line-height: 1.1; text-align: center; padding: 2px 6px; }
+.time-input-inline:focus { outline: none; }
+.timer-card.dragging { opacity: .45; }
+.timer-card.drop-before { box-shadow: inset 0 3px 0 var(--accent), var(--shadow); }
+.timer-card.drop-after { box-shadow: inset 0 -3px 0 var(--accent), var(--shadow); }
 .card-endtime { text-align: center; font-size: 12px; color: var(--muted); }
 .card-progress-ring { display: block; margin: 0 auto; }
 .card-progress-bar { height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
