@@ -45,7 +45,7 @@ Other browsers: Chrome (with Google Play Services) and Samsung Internet on Samsu
 
 **Updating after a change**
 
-The service worker caches the app shell. Whenever you change `index.html`, `styles.css`, `app.js`, `sync.js`, the manifest or the icons, bump `CACHE_NAME` in `sw.js` (for example `chronogrid-v3` → `chronogrid-v4`) before deploying. Old caches are removed automatically, though users may need to reopen the app once to see the update.
+The service worker caches the app shell. Whenever you change `index.html`, `styles.css`, `app.js`, `sync.js`, the manifest or the icons, bump `CACHE_NAME` in `sw.js` (for example `chronogrid-v4` → `chronogrid-v5`) before deploying. Old caches are removed automatically, though users may need to reopen the app once to see the update.
 
 ## Syncing between PC and phone (GitHub Gist)
 
@@ -61,7 +61,8 @@ The app can keep both devices in sync through one **secret Gist** containing `ch
 
 **How it behaves**
 
-- With auto-sync on (the default), changes are pushed about 2 seconds after you stop editing, and the remote copy is pulled when the app loads or when connectivity returns.
+- With auto-sync on (the default), changes are pushed about 2 seconds after you stop editing. The remote copy is pulled on load, on reconnect, when you return to the tab, and every 20 seconds while the app is open — so edits on one device appear on the other automatically.
+- Editing an existing timer (label, duration, colours, settings, etc.) updates its timestamp, so the newer edit wins on the other device. Running/paused countdown values are treated as local runtime state and are not merged.
 - **Sync** in the toolbar forces an immediate sync and shows status: off, on, syncing, synced, offline or error.
 - When both devices changed the same timer, the copy with the newer `updatedAt` wins; timers only present on one device are kept. Deletions are recorded so a removed timer does not come back. Presets merge the same way.
 - Top-level settings (theme, timezone, 12/24h) follow the device with the newer overall change. A running countdown may jump after a merge — that is expected.

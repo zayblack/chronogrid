@@ -13,6 +13,9 @@ let lastTick = Date.now();
 let toastTimer = null;
 let inlineEdit = null;
 let dragId = null;
+let lastSavedSig = new Map();
+
+refreshSavedSignatures();
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
@@ -76,10 +79,43 @@ function loadState() {
   } catch { return migrateState({}); }
 }
 
+// Runtime fields change every second; they must not make a timer look "newer"
+// than the same timer on another device, or sync would churn constantly.
+const RUNTIME_FIELDS = ["remaining", "elapsed", "endAt", "running", "finished", "lastTriggered"];
+
+function configSignature(item, isTimer) {
+  const copy = { ...item };
+  delete copy.updatedAt;
+  if (isTimer) RUNTIME_FIELDS.forEach(k => delete copy[k]);
+  return JSON.stringify(copy);
+}
+
+function refreshSavedSignatures() {
+  lastSavedSig = new Map();
+  state.timers.forEach(t => lastSavedSig.set("t:" + t.id, configSignature(t, true)));
+  state.presets.forEach(p => lastSavedSig.set("p:" + p.id, configSignature(p, false)));
+}
+
+// Any real edit to a timer/preset (label, duration, settings, ...) advances its
+// timestamp so the "newest wins" merge can actually see the change.
+function touchChangedItems() {
+  const now = new Date().toISOString();
+  state.timers.forEach(t => {
+    if (lastSavedSig.get("t:" + t.id) !== configSignature(t, true)) t.updatedAt = now;
+  });
+  state.presets.forEach(p => {
+    if (lastSavedSig.get("p:" + p.id) !== configSignature(p, false)) p.updatedAt = now;
+  });
+}
+
 function saveState({ touch = true, notifySync = true } = {}) {
-  if (touch) state.updatedAt = new Date().toISOString();
+  if (touch) {
+    touchChangedItems();
+    state.updatedAt = new Date().toISOString();
+  }
   const toSave = { ...state, activeSounds: [...soundLoopTimers.keys()] };
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave)); } catch (e) { console.warn(e); }
+  refreshSavedSignatures();
   if (notifySync && typeof scheduleSync === "function") scheduleSync();
 }
 
@@ -432,7 +468,7 @@ function tick() {
       needRender = true;
     }
   }
-  if (changed) saveState();
+  if (changed) saveState({ touch: false, notifySync: false });
   if (needRender) renderTimers();
   else if (changed) state.timers.forEach(updateCard);
   updateTitle();
@@ -725,6 +761,7 @@ function importState(file) {
       const data = JSON.parse(reader.result);
       if (!Array.isArray(data.timers)) throw new Error("Invalid file");
       state = migrateState(data);
+      refreshSavedSignatures();
       saveState(); applyUiState(); renderTimers(); renderGroupFilters(); toast("Imported settings");
     } catch (e) { toast("Import failed: " + e.message); }
   };

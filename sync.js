@@ -6,6 +6,7 @@ const SYNC_KEY = "chronogrid.sync.v1";
 const GIST_FILE = "chronogrid-state.json";
 const GITHUB_API = "https://api.github.com";
 const SYNC_DEBOUNCE_MS = 2000;
+const SYNC_POLL_MS = 20000;
 
 let syncTimer = null;
 let syncing = false;
@@ -53,6 +54,20 @@ function stripVolatile(value) {
   delete copy.activeSounds;
   delete copy.deviceId;
   delete copy.sync;
+  return copy;
+}
+
+// Like stripVolatile, but also ignores a running timer's second-by-second
+// fields so ticking alone never counts as a change worth pushing.
+function syncComparable(value) {
+  const copy = stripVolatile(value);
+  if (Array.isArray(copy.timers)) {
+    copy.timers = copy.timers.map(t => {
+      const c = { ...t };
+      for (const k of RUNTIME_FIELDS) delete c[k];
+      return c;
+    });
+  }
   return copy;
 }
 
@@ -199,7 +214,7 @@ function mergeStates(local, remote) {
     deviceId: l.deviceId,
     activeSounds: l.activeSounds,
   };
-  const changed = JSON.stringify(stripVolatile(merged)) !== JSON.stringify(stripVolatile(l));
+  const changed = JSON.stringify(syncComparable(merged)) !== JSON.stringify(syncComparable(l));
   return { state: merged, changed };
 }
 
@@ -220,7 +235,7 @@ function scheduleSync() {
   syncTimer = setTimeout(() => syncNow(), SYNC_DEBOUNCE_MS);
 }
 
-async function syncNow({ manual = false } = {}) {
+async function syncNow({ manual = false, quiet = false } = {}) {
   const cfg = loadSyncConfig();
   if (!cfg || !cfg.gistId || !cfg.token) {
     setSyncStatus("Sync: off");
@@ -231,7 +246,7 @@ async function syncNow({ manual = false } = {}) {
   if (!navigator.onLine) { setSyncStatus("Offline"); return; }
 
   syncing = true;
-  setSyncStatus("Syncing…");
+  if (!quiet) setSyncStatus("Syncing…");
   try {
     const remote = normalizeRemote(await pullRemote(cfg));
     const merged = mergeStates(state, remote);
@@ -240,7 +255,7 @@ async function syncNow({ manual = false } = {}) {
       toast("Applied changes from another device");
     }
     // Push whenever the local state still differs from what is stored remotely.
-    if (manual || JSON.stringify(stripVolatile(state)) !== JSON.stringify(stripVolatile(remote))) {
+    if (manual || JSON.stringify(syncComparable(state)) !== JSON.stringify(syncComparable(remote))) {
       await pushRemote(cfg, buildPayload(state));
     }
     cfg.lastSyncAt = new Date().toISOString();
@@ -324,6 +339,17 @@ function initSync() {
   window.addEventListener("online", () => {
     const cfg = loadSyncConfig();
     if (cfg && cfg.auto !== false && cfg.gistId && cfg.token) syncNow();
+  });
+
+  const autoAllowed = () => {
+    const cfg = loadSyncConfig();
+    return !!(cfg && cfg.auto !== false && cfg.gistId && cfg.token && navigator.onLine);
+  };
+  setInterval(() => {
+    if (document.visibilityState === "visible" && autoAllowed()) syncNow({ quiet: true });
+  }, SYNC_POLL_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && autoAllowed()) syncNow();
   });
 
   refreshSyncUi();
