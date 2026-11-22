@@ -22,6 +22,7 @@ A single-page clock and timer dashboard. No build step, no dependencies: open `i
 - `index.html` — markup and UI structure.
 - `styles.css` — theme, layout, and card styling.
 - `app.js` — clock rendering, timer engine, audio/voice, presets, persistence, service-worker registration.
+- `sync.js` — optional PC ↔ phone sync through a secret GitHub Gist.
 - `manifest.webmanifest` — install metadata: name, icons, colors, standalone display.
 - `sw.js` — caches the app shell so the app works offline.
 - `icons/` — PWA icons; run `python3 generate_icons.py` here (requires Pillow) to regenerate them.
@@ -44,7 +45,30 @@ Other browsers: Chrome (with Google Play Services) and Samsung Internet on Samsu
 
 **Updating after a change**
 
-The service worker caches the app shell. Whenever you change `index.html`, `styles.css`, `app.js`, the manifest or the icons, bump `CACHE_NAME` in `sw.js` (for example `chronogrid-v1` → `chronogrid-v2`) before deploying. Old caches are removed automatically, though users may need to reopen the app once to see the update.
+The service worker caches the app shell. Whenever you change `index.html`, `styles.css`, `app.js`, `sync.js`, the manifest or the icons, bump `CACHE_NAME` in `sw.js` (for example `chronogrid-v2` → `chronogrid-v3`) before deploying. Old caches are removed automatically, though users may need to reopen the app once to see the update.
+
+## Syncing between PC and phone (GitHub Gist)
+
+The app can keep both devices in sync through one **secret Gist** containing `chronogrid-state.json`. Timers, presets and settings are synced; the Gist token is not.
+
+**One-time setup**
+
+1. In GitHub, create a **fine-grained personal access token** with the account permission **Gists: write** and a sensible expiry (e.g. 90 days). A classic token with only the `gist` scope also works. Copy the token — GitHub shows it only once.
+2. Open ChronoGrid on the first device and click **Sync setup**.
+3. Paste the token into **GitHub personal access token**.
+4. Leave **Gist ID** empty and click **Create secret Gist**. The ID is filled in for you. On the second device, paste that same Gist ID instead of creating another one.
+5. Click **Save & sync**. Repeat steps 2–5 on the other device using the same Gist ID.
+
+**How it behaves**
+
+- With auto-sync on (the default), changes are pushed about 2 seconds after you stop editing, and the remote copy is pulled when the app loads or when connectivity returns.
+- **Sync** in the toolbar forces an immediate sync and shows status: off, on, syncing, synced, offline or error.
+- When both devices changed the same timer, the copy with the newer `updatedAt` wins; timers only present on one device are kept. Deletions are recorded so a removed timer does not come back. Presets merge the same way.
+- Top-level settings (theme, timezone, 12/24h) follow the device with the newer overall change. A running countdown may jump after a merge — that is expected.
+- Sync only happens while the app is open. Offline edits stay local and sync when you return online.
+- The token is stored only in that device's `localStorage`, is never included in **Export**, and can be removed with **Sync setup → Forget this device**. Revoke the token on GitHub if you lose a device.
+
+Export/Import still works and remains the recommended backup before clearing browser data.
 
 ## Notes
 

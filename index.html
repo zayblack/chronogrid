@@ -54,6 +54,8 @@
       <div class="toolbar-right">
         <button class="btn ghost" id="themeBtn">Light mode</button>
         <button class="btn ghost" id="fullscreenBtn">Fullscreen</button>
+        <button class="btn ghost" id="syncBtn" title="Sync now">Sync: off</button>
+        <button class="btn ghost" id="syncSetupBtn" title="Sync settings">Sync setup</button>
         <button class="btn ghost" id="exportBtn">Export</button>
         <button class="btn ghost" id="importBtn">Import</button>
         <input type="file" id="importFile" accept="application/json" hidden>
@@ -211,9 +213,34 @@
       </div>
     </div>
 
+    <!-- Sync settings modal -->
+    <div class="modal-backdrop" id="syncModal" hidden>
+      <div class="modal sync-modal" role="dialog" aria-modal="true" aria-labelledby="syncTitle">
+        <div class="modal-header">
+          <h2 id="syncTitle">Sync settings</h2>
+          <button class="icon-btn" id="syncClose" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <p class="sync-help">ChronoGrid stores one plain-JSON file in a secret GitHub Gist. Create a fine-grained token with the <strong>Gists: write</strong> permission, then either create a Gist below or paste an existing Gist ID. The token stays on this device and is never included in an export.</p>
+          <div class="field"><label for="syncToken">GitHub personal access token</label><input type="password" id="syncToken" autocomplete="off" placeholder="github_pat_..."></div>
+          <div class="field"><label for="syncGistId">Gist ID</label><input type="text" id="syncGistId" autocapitalize="off" placeholder="Create one below, or paste an existing ID"></div>
+          <button class="btn" id="syncCreateGist">Create secret Gist</button>
+          <label class="check" style="margin-top:14px"><input type="checkbox" id="syncAuto" checked> Sync automatically after changes</label>
+          <p class="sync-status" id="syncStatus">Not configured</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn danger" id="syncForget">Forget this device</button>
+          <div class="spacer"></div>
+          <button class="btn ghost" id="syncCancel">Cancel</button>
+          <button class="btn primary" id="syncSave">Save &amp; sync</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Toast -->
     <div class="toast" id="toast" hidden></div>
   </div>
   <script src="app.js"></script>
+  <script src="sync.js"></script>
 </body>
 </html>

@@ -28,6 +28,7 @@ function defaultTimer(overrides = {}) {
     sound: "beep", volume: 70, repeatSound: false,
     speak: false, speakText: "Timer {label} finished", speakLang: "en-US", speakRate: 1,
     notify: true, updateTitle: true,
+    updatedAt: new Date().toISOString(),
     ...overrides,
   };
 }
@@ -39,18 +40,47 @@ function defaultState() {
   };
 }
 
+const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+// Bring older saves (and imported backups) up to the syncable shape.
+function migrateState(raw) {
+  const base = defaultState();
+  const s = { ...base, ...(raw && typeof raw === "object" ? raw : {}) };
+  const now = new Date().toISOString();
+  const fallback = typeof s.updatedAt === "string" && s.updatedAt ? s.updatedAt : now;
+
+  s.timers = Array.isArray(s.timers) ? s.timers.filter(Boolean).map(t => ({
+    ...defaultTimer(), ...t,
+    id: t.id || uid(),
+    updatedAt: typeof t.updatedAt === "string" && t.updatedAt ? t.updatedAt : fallback,
+  })) : [];
+  s.presets = Array.isArray(s.presets) ? s.presets.filter(p => p && typeof p === "object").map(p => ({
+    id: p.id || uid(),
+    name: p.name || "Preset",
+    data: p.data && typeof p.data === "object" ? p.data : {},
+    updatedAt: typeof p.updatedAt === "string" && p.updatedAt ? p.updatedAt : fallback,
+  })) : [];
+  s.deletedTimers = Array.isArray(s.deletedTimers) ? s.deletedTimers.filter(d => d && d.id) : [];
+  s.deletedPresets = Array.isArray(s.deletedPresets) ? s.deletedPresets.filter(d => d && d.id) : [];
+  s.activeSounds = Array.isArray(s.activeSounds) ? s.activeSounds : [];
+  s.updatedAt = fallback;
+  s.deviceId = s.deviceId || uid();
+  return s;
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultState();
-    const parsed = JSON.parse(raw);
-    return { ...defaultState(), ...parsed };
-  } catch { return defaultState(); }
+    if (!raw) return migrateState({});
+    return migrateState(JSON.parse(raw));
+  } catch { return migrateState({}); }
 }
 
-function saveState() {
+function saveState({ touch = true, notifySync = true } = {}) {
+  if (touch) state.updatedAt = new Date().toISOString();
   const toSave = { ...state, activeSounds: [...soundLoopTimers.keys()] };
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave)); } catch (e) { console.warn(e); }
+  if (notifySync && typeof scheduleSync === "function") scheduleSync();
 }
 
 function toast(msg) {
@@ -360,6 +390,7 @@ function deleteTimer(id) {
   if (!confirm(`Delete timer "${t.label}"?`)) return;
   stopSound(id);
   state.timers = state.timers.filter(x => x.id !== id);
+  state.deletedTimers.push({ id, deletedAt: new Date().toISOString() });
   renderTimers(); saveState();
 }
 
@@ -621,7 +652,12 @@ function openPresets(sourceId = null) {
     el.innerHTML = `<strong>${escapeHtml(p.name)}</strong><small>${p.data.mode === "up" ? "Count up" : fmt(p.data.duration)}</small>`;
     el.onclick = () => addFromPreset(p.data);
     const del = document.createElement("button"); del.className = "btn tiny danger"; del.textContent = "×"; del.style.cssText = "float:right";
-    del.onclick = (e) => { e.stopPropagation(); state.presets.splice(i, 1); saveState(); openPresets(); };
+    del.onclick = (e) => {
+      e.stopPropagation();
+      const [removed] = state.presets.splice(i, 1);
+      state.deletedPresets.push({ id: removed.id, deletedAt: new Date().toISOString() });
+      saveState(); openPresets();
+    };
     el.appendChild(del);
     cu.appendChild(el);
   });
@@ -642,7 +678,7 @@ function saveCurrentAsPreset() {
   const source = presetSourceId ? getTimer(presetSourceId) : state.timers[state.timers.length - 1];
   if (!source) { toast("No timer to save"); return; }
   const { id, running, finished, endAt, remaining, elapsed, lastTriggered, ...data } = source;
-  state.presets.push({ name, data });
+  state.presets.push({ id: uid(), name, data, updatedAt: new Date().toISOString() });
   $("newPresetName").value = "";
   saveState(); openPresets(); toast(`Saved preset "${name}"`);
 }
@@ -688,8 +724,8 @@ function importState(file) {
     try {
       const data = JSON.parse(reader.result);
       if (!Array.isArray(data.timers)) throw new Error("Invalid file");
-      state = { ...defaultState(), ...data };
-      saveState(); applyUiState(); renderTimers(); toast("Imported settings");
+      state = migrateState(data);
+      saveState(); applyUiState(); renderTimers(); renderGroupFilters(); toast("Imported settings");
     } catch (e) { toast("Import failed: " + e.message); }
   };
   reader.readAsText(file);
