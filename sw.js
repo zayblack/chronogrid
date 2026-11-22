@@ -1,6 +1,6 @@
 /* ChronoGrid service worker — offline app shell.
    Bump CACHE_NAME whenever a cached file changes so returning users get the update. */
-const CACHE_NAME = "chronogrid-v3";
+const CACHE_NAME = "chronogrid-v4";
 
 const APP_SHELL = [
   "./",
@@ -38,29 +38,21 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Pages: prefer the network so updates are picked up, fall back to cached HTML offline.
-  if (request.mode === "navigate") {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (!response.ok) return caches.match("./index.html");
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy));
-          return response;
-        })
-        .catch(() => caches.match("./index.html"))
-    );
-    return;
-  }
+  // Network first for every shell file so HTML/CSS/JS never load from different
+  // versions after a deploy. Fall back to the cache when offline or on a bad
+  // response; navigation always falls back to the cached HTML.
+  const fromCache = () => request.mode === "navigate"
+    ? caches.match("./index.html")
+    : caches.match(request);
 
-  // Static files: cache first, then network, caching successful responses.
   event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-      if (response.ok) {
+    fetch(request)
+      .then((response) => {
+        if (!response.ok) return fromCache();
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-      }
-      return response;
-    }))
+        return response;
+      })
+      .catch(fromCache)
   );
 });
