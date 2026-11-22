@@ -71,6 +71,32 @@ function syncComparable(value) {
   return copy;
 }
 
+// Like syncComparable, but also ignores bookkeeping metadata. This is what
+// decides whether a toast is warranted: a newer timestamp or revision on its
+// own is not something the user needs to be told about.
+function contentSignature(value) {
+  const copy = stripVolatile(value);
+  const stripMeta = (o) => {
+    delete o.updatedAt;
+    delete o.rev;
+    delete o.settingsRev;
+    delete o.deletedAt;
+    return o;
+  };
+  stripMeta(copy);
+  if (Array.isArray(copy.timers)) {
+    copy.timers = copy.timers.map(t => {
+      const c = stripMeta({ ...t });
+      for (const k of RUNTIME_FIELDS) delete c[k];
+      return c;
+    });
+  }
+  if (Array.isArray(copy.presets)) copy.presets = copy.presets.map(p => stripMeta({ ...p }));
+  if (Array.isArray(copy.deletedTimers)) copy.deletedTimers = copy.deletedTimers.map(d => stripMeta({ ...d }));
+  if (Array.isArray(copy.deletedPresets)) copy.deletedPresets = copy.deletedPresets.map(d => stripMeta({ ...d }));
+  return JSON.stringify(copy);
+}
+
 function buildPayload(value) {
   return {
     version: 1,
@@ -142,15 +168,25 @@ async function createSecretGist(token) {
 }
 
 /* ---------- Merge ---------- */
-function timestampOf(item) {
-  return item && typeof item === "object" && typeof item.updatedAt === "string" ? item.updatedAt : "";
+// An edit point is a revision plus a timestamp. The revision is authoritative —
+// wall-clock time only breaks ties when two devices edit from the same revision.
+function pointOf(item, tsKey = "updatedAt") {
+  return {
+    rev: Number(item && item.rev) || 0,
+    at: item && typeof item[tsKey] === "string" ? item[tsKey] : "",
+  };
+}
+
+function isNewer(a, b) {
+  if (a.rev !== b.rev) return a.rev > b.rev;
+  return a.at > b.at;
 }
 
 function mergeCollection(localItems, remoteItems, localDeleted, remoteDeleted) {
   const localLive = new Map((localItems || []).filter(x => x && x.id).map(x => [x.id, x]));
   const remoteLive = new Map((remoteItems || []).filter(x => x && x.id).map(x => [x.id, x]));
-  const localGone = new Map((localDeleted || []).filter(x => x && x.id).map(x => [x.id, x.deletedAt || ""]));
-  const remoteGone = new Map((remoteDeleted || []).filter(x => x && x.id).map(x => [x.id, x.deletedAt || ""]));
+  const localGone = new Map((localDeleted || []).filter(x => x && x.id).map(x => [x.id, x]));
+  const remoteGone = new Map((remoteDeleted || []).filter(x => x && x.id).map(x => [x.id, x]));
 
   const allIds = new Set([...localLive.keys(), ...remoteLive.keys(), ...localGone.keys(), ...remoteGone.keys()]);
   const items = [];
@@ -160,18 +196,22 @@ function mergeCollection(localItems, remoteItems, localDeleted, remoteDeleted) {
   function decide(id) {
     const localItem = localLive.get(id);
     const remoteItem = remoteLive.get(id);
-    const localDel = localGone.get(id) || "";
-    const remoteDel = remoteGone.get(id) || "";
+    const localDel = localGone.get(id);
+    const remoteDel = remoteGone.get(id);
 
-    const lt = timestampOf(localItem);
-    const rt = timestampOf(remoteItem);
-    // On a tie, prefer the live item and this device's copy.
-    const liveItem = lt >= rt ? (localItem || remoteItem) : (remoteItem || localItem);
-    const liveAt = lt >= rt ? lt : rt;
-    const deletedAt = localDel >= remoteDel ? localDel : remoteDel;
+    const lp = pointOf(localItem);
+    const rp = pointOf(remoteItem);
+    const remoteWins = isNewer(rp, lp);
+    const liveItem = remoteWins ? (remoteItem || localItem) : (localItem || remoteItem);
+    const livePoint = liveItem ? (remoteWins ? rp : lp) : { rev: -1, at: "" };
 
-    if (liveItem && liveAt >= deletedAt) items.push(liveItem);
-    else if (deletedAt) deleted.push({ id, deletedAt });
+    const ldp = pointOf(localDel, "deletedAt");
+    const rdp = pointOf(remoteDel, "deletedAt");
+    const deletePoint = localDel || remoteDel ? (isNewer(ldp, rdp) ? ldp : rdp) : { rev: -1, at: "" };
+
+    // A deletion only wins if it is strictly newer; ties keep the live item.
+    if (liveItem && !isNewer(deletePoint, livePoint)) items.push(liveItem);
+    else if (deletePoint.at) deleted.push({ id, deletedAt: deletePoint.at, rev: deletePoint.rev });
     else if (liveItem) items.push(liveItem);
   }
 
@@ -198,7 +238,10 @@ function mergeStates(local, remote) {
   const r = migrateState(remote);
   const timers = mergeCollection(l.timers, r.timers, l.deletedTimers, r.deletedTimers);
   const presets = mergeCollection(l.presets, r.presets, l.deletedPresets, r.deletedPresets);
-  const settingsSource = (r.updatedAt || "").localeCompare(l.updatedAt || "") > 0 ? r : l;
+  const lp = pointOf({ rev: l.settingsRev, updatedAt: l.updatedAt });
+  const rp = pointOf({ rev: r.settingsRev, updatedAt: r.updatedAt });
+  const remoteSettingsWins = isNewer(rp, lp);
+  const settingsSource = remoteSettingsWins ? r : l;
 
   const merged = {
     ...l,
@@ -210,12 +253,14 @@ function mergeStates(local, remote) {
     showSeconds: settingsSource.showSeconds,
     timezone: settingsSource.timezone,
     theme: settingsSource.theme,
-    updatedAt: (l.updatedAt || "").localeCompare(r.updatedAt || "") >= 0 ? l.updatedAt : r.updatedAt,
+    settingsRev: remoteSettingsWins ? rp.rev : lp.rev,
+    updatedAt: (l.updatedAt || "") >= (r.updatedAt || "") ? l.updatedAt : r.updatedAt,
     deviceId: l.deviceId,
     activeSounds: l.activeSounds,
   };
-  const changed = JSON.stringify(syncComparable(merged)) !== JSON.stringify(syncComparable(l));
-  return { state: merged, changed };
+  const changed = contentSignature(merged) !== contentSignature(l);
+  const differs = JSON.stringify(syncComparable(merged)) !== JSON.stringify(syncComparable(l));
+  return { state: merged, changed, differs };
 }
 
 function applyMerged(next) {
@@ -250,9 +295,11 @@ async function syncNow({ manual = false, quiet = false } = {}) {
   try {
     const remote = normalizeRemote(await pullRemote(cfg));
     const merged = mergeStates(state, remote);
-    if (merged.changed) {
+    if (merged.differs) {
+      // Revisions/timestamps may need to converge silently. Only tell the user
+      // when actual timer or setting content changed.
       applyMerged(merged.state);
-      toast("Applied changes from another device");
+      if (merged.changed) toast("Applied changes from another device");
     }
     // Push whenever the local state still differs from what is stored remotely.
     if (manual || JSON.stringify(syncComparable(state)) !== JSON.stringify(syncComparable(remote))) {

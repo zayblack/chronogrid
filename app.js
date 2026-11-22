@@ -14,6 +14,7 @@ let toastTimer = null;
 let inlineEdit = null;
 let dragId = null;
 let lastSavedSig = new Map();
+let lastSettingsSig = "";
 
 // Runtime fields change every second; they must not make a timer look "newer"
 // than the same timer on another device, or sync would churn constantly.
@@ -35,6 +36,7 @@ function defaultTimer(overrides = {}) {
     sound: "beep", volume: 70, repeatSound: false,
     speak: false, speakText: "Timer {label} finished", speakLang: "en-US", speakRate: 1,
     notify: true, updateTitle: true,
+    rev: 0,
     updatedAt: new Date().toISOString(),
     ...overrides,
   };
@@ -43,7 +45,7 @@ function defaultTimer(overrides = {}) {
 function defaultState() {
   return {
     timers: [], presets: [], hour24: true, showSeconds: true, timezone: "",
-    theme: "dark", activeSounds: [],
+    theme: "dark", activeSounds: [], settingsRev: 0,
   };
 }
 
@@ -59,17 +61,20 @@ function migrateState(raw) {
   s.timers = Array.isArray(s.timers) ? s.timers.filter(Boolean).map(t => ({
     ...defaultTimer(), ...t,
     id: t.id || uid(),
+    rev: Number.isFinite(t.rev) ? t.rev : 0,
     updatedAt: typeof t.updatedAt === "string" && t.updatedAt ? t.updatedAt : fallback,
   })) : [];
   s.presets = Array.isArray(s.presets) ? s.presets.filter(p => p && typeof p === "object").map(p => ({
     id: p.id || uid(),
     name: p.name || "Preset",
     data: p.data && typeof p.data === "object" ? p.data : {},
+    rev: Number.isFinite(p.rev) ? p.rev : 0,
     updatedAt: typeof p.updatedAt === "string" && p.updatedAt ? p.updatedAt : fallback,
   })) : [];
   s.deletedTimers = Array.isArray(s.deletedTimers) ? s.deletedTimers.filter(d => d && d.id) : [];
   s.deletedPresets = Array.isArray(s.deletedPresets) ? s.deletedPresets.filter(d => d && d.id) : [];
   s.activeSounds = Array.isArray(s.activeSounds) ? s.activeSounds : [];
+  s.settingsRev = Number.isFinite(s.settingsRev) ? s.settingsRev : 0;
   s.updatedAt = fallback;
   s.deviceId = s.deviceId || uid();
   return s;
@@ -86,33 +91,63 @@ function loadState() {
 function configSignature(item, isTimer) {
   const copy = { ...item };
   delete copy.updatedAt;
+  delete copy.rev;
   if (isTimer) RUNTIME_FIELDS.forEach(k => delete copy[k]);
   return JSON.stringify(copy);
+}
+
+// Settings that are merged as a group. Deletions are included because they are
+// real configuration changes, unlike a running timer's second-by-second state.
+function settingsSignature() {
+  return JSON.stringify({
+    hour24: state.hour24,
+    showSeconds: state.showSeconds,
+    timezone: state.timezone,
+    theme: state.theme,
+    deletedTimers: state.deletedTimers,
+    deletedPresets: state.deletedPresets,
+  });
 }
 
 function refreshSavedSignatures() {
   lastSavedSig = new Map();
   state.timers.forEach(t => lastSavedSig.set("t:" + t.id, configSignature(t, true)));
   state.presets.forEach(p => lastSavedSig.set("p:" + p.id, configSignature(p, false)));
+  lastSettingsSig = settingsSignature();
 }
 
-// Any real edit to a timer/preset (label, duration, settings, ...) advances its
-// timestamp so the "newest wins" merge can actually see the change.
+// A real edit to a timer/preset (label, duration, settings, ...) advances its
+// revision counter. Sync merges by revision first, so an edit always beats an
+// older copy even if a device's clock is slightly wrong. Runtime changes such
+// as the ticking countdown are deliberately excluded from the signature.
 function touchChangedItems() {
   const now = new Date().toISOString();
+  let changed = false;
   state.timers.forEach(t => {
-    if (lastSavedSig.get("t:" + t.id) !== configSignature(t, true)) t.updatedAt = now;
+    if (lastSavedSig.get("t:" + t.id) !== configSignature(t, true)) {
+      t.updatedAt = now;
+      t.rev = (Number(t.rev) || 0) + 1;
+      changed = true;
+    }
   });
   state.presets.forEach(p => {
-    if (lastSavedSig.get("p:" + p.id) !== configSignature(p, false)) p.updatedAt = now;
+    if (lastSavedSig.get("p:" + p.id) !== configSignature(p, false)) {
+      p.updatedAt = now;
+      p.rev = (Number(p.rev) || 0) + 1;
+      changed = true;
+    }
   });
+  if (settingsSignature() !== lastSettingsSig) {
+    state.settingsRev = (Number(state.settingsRev) || 0) + 1;
+    changed = true;
+  }
+  return changed;
 }
 
 function saveState({ touch = true, notifySync = true } = {}) {
-  if (touch) {
-    touchChangedItems();
-    state.updatedAt = new Date().toISOString();
-  }
+  // Only a real config change advances the state timestamp; start/pause and
+  // countdown ticks must not make one device look "newer" than another.
+  if (touch && touchChangedItems()) state.updatedAt = new Date().toISOString();
   const toSave = { ...state, activeSounds: [...soundLoopTimers.keys()] };
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave)); } catch (e) { console.warn(e); }
   refreshSavedSignatures();
@@ -425,8 +460,9 @@ function deleteTimer(id) {
   const t = getTimer(id); if (!t) return;
   if (!confirm(`Delete timer "${t.label}"?`)) return;
   stopSound(id);
+  const rev = (Number(t.rev) || 0) + 1;
   state.timers = state.timers.filter(x => x.id !== id);
-  state.deletedTimers.push({ id, deletedAt: new Date().toISOString() });
+  state.deletedTimers.push({ id, deletedAt: new Date().toISOString(), rev });
   renderTimers(); saveState();
 }
 
@@ -691,7 +727,7 @@ function openPresets(sourceId = null) {
     del.onclick = (e) => {
       e.stopPropagation();
       const [removed] = state.presets.splice(i, 1);
-      state.deletedPresets.push({ id: removed.id, deletedAt: new Date().toISOString() });
+      state.deletedPresets.push({ id: removed.id, deletedAt: new Date().toISOString(), rev: (Number(removed.rev) || 0) + 1 });
       saveState(); openPresets();
     };
     el.appendChild(del);
@@ -714,7 +750,7 @@ function saveCurrentAsPreset() {
   const source = presetSourceId ? getTimer(presetSourceId) : state.timers[state.timers.length - 1];
   if (!source) { toast("No timer to save"); return; }
   const { id, running, finished, endAt, remaining, elapsed, lastTriggered, ...data } = source;
-  state.presets.push({ id: uid(), name, data, updatedAt: new Date().toISOString() });
+  state.presets.push({ id: uid(), name, data, rev: 0, updatedAt: new Date().toISOString() });
   $("newPresetName").value = "";
   saveState(); openPresets(); toast(`Saved preset "${name}"`);
 }
@@ -760,8 +796,9 @@ function importState(file) {
     try {
       const data = JSON.parse(reader.result);
       if (!Array.isArray(data.timers)) throw new Error("Invalid file");
+      // Keep the old signatures so saveState() sees the imported values as real
+      // changes and gives them new revisions that sync can propagate.
       state = migrateState(data);
-      refreshSavedSignatures();
       saveState(); applyUiState(); renderTimers(); renderGroupFilters(); toast("Imported settings");
     } catch (e) { toast("Import failed: " + e.message); }
   };
@@ -899,3 +936,6 @@ if ("serviceWorker" in navigator) {
       .catch((err) => console.warn("Service worker registration failed:", err));
   });
 }
+
+// Tells the startup watchdog in index.html that init completed successfully.
+window.__chronogridBooted = true;

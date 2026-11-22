@@ -2,6 +2,70 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <script>
+  (function () {
+    // Keep APP_VERSION in step with CACHE_NAME in sw.js on every deploy.
+    var APP_VERSION = "v7";
+    var VERSION_KEY = "chronogrid.appVersion";
+    var REPAIR_KEY = "chronogrid.bootRepairs";
+
+    function repair() {
+      var jobs = [];
+      try {
+        if ("serviceWorker" in navigator) {
+          jobs.push(navigator.serviceWorker.getRegistrations().then(function (regs) {
+            return Promise.all(regs.map(function (reg) { return reg.unregister(); }));
+          }));
+        }
+      } catch (e) {}
+      try {
+        if (window.caches && caches.keys) {
+          jobs.push(caches.keys().then(function (keys) {
+            return Promise.all(keys.map(function (key) { return caches.delete(key); }));
+          }));
+        }
+      } catch (e) {}
+      var settled = false;
+      var done = function () {
+        if (settled) return;
+        settled = true;
+        location.reload();
+      };
+      setTimeout(done, 1500);
+      Promise.all(jobs).then(done, done);
+    }
+
+    try {
+      var previous = localStorage.getItem(VERSION_KEY);
+      var repairs = parseInt(localStorage.getItem(REPAIR_KEY) || "0", 10) || 0;
+
+      if (previous !== APP_VERSION) {
+        localStorage.setItem(VERSION_KEY, APP_VERSION);
+        localStorage.setItem(REPAIR_KEY, "0");
+        repair();
+        return;
+      }
+
+      // If app.js never finishes init, the browser is probably serving a stale
+      // or mixed cached bundle. Purge it automatically, but never loop forever.
+      setTimeout(function () {
+        if (window.__chronogridBooted || repairs >= 2) return;
+        localStorage.setItem(REPAIR_KEY, String(repairs + 1));
+        repair();
+      }, 4000);
+
+      window.addEventListener("load", function () {
+        setTimeout(function () {
+          if (window.__chronogridBooted) {
+            try { localStorage.setItem(REPAIR_KEY, "0"); } catch (e) {}
+          }
+        }, 5000);
+      });
+    } catch (e) {
+      setTimeout(function () { if (!window.__chronogridBooted) location.reload(); }, 4000);
+    }
+  })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#0e1117">
   <title>ChronoGrid — Clock &amp; Timers</title>

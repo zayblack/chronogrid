@@ -45,7 +45,7 @@ Other browsers: Chrome (with Google Play Services) and Samsung Internet on Samsu
 
 **Updating after a change**
 
-The service worker caches the app shell. Whenever you change `index.html`, `styles.css`, `app.js`, `sync.js`, the manifest or the icons, bump `CACHE_NAME` in `sw.js` (for example `chronogrid-v5` → `chronogrid-v6`) before deploying. Old caches are removed automatically, though users may need to reopen the app once to see the update.
+The service worker caches the app shell. Whenever you change `index.html`, `styles.css`, `app.js`, `sync.js`, the manifest or the icons, bump **both** `CACHE_NAME` in `sw.js` (for example `chronogrid-v6` → `chronogrid-v7`) and `APP_VERSION` in the startup guard at the top of `index.html` (`v6` → `v7`) before deploying. On a version change the app unregisters the old service worker, clears its caches and reloads automatically. A boot watchdog repeats that repair once if the app ever fails to start with a stale bundle. Your saved timers and sync settings in `localStorage` are not cleared.
 
 ## Syncing between PC and phone (GitHub Gist)
 
