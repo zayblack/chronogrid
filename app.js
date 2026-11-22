@@ -818,3 +818,11 @@ state.timers.forEach(t => {
 });
 setInterval(tick, 200);
 setInterval(renderClock, 1000);
+
+/* ---------- PWA: offline support and home-screen install ---------- */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js")
+      .catch((err) => console.warn("Service worker registration failed:", err));
+  });
+}

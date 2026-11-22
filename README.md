@@ -21,10 +21,34 @@ A single-page clock and timer dashboard. No build step, no dependencies: open `i
 
 - `index.html` — markup and UI structure.
 - `styles.css` — theme, layout, and card styling.
-- `app.js` — clock rendering, timer engine, audio/voice, presets, persistence.
+- `app.js` — clock rendering, timer engine, audio/voice, presets, persistence, service-worker registration.
+- `manifest.webmanifest` — install metadata: name, icons, colors, standalone display.
+- `sw.js` — caches the app shell so the app works offline.
+- `icons/` — PWA icons; run `python3 generate_icons.py` here (requires Pillow) to regenerate them.
+
+## Android / PWA
+
+The app is installable as a Progressive Web App. Serve this folder over **HTTPS** (GitHub Pages, Netlify, or any static host) — service workers need a secure context. `http://localhost` works for local testing, but a plain `http://<LAN-IP>` address will not make the app installable.
+
+**Installing in Brave on Android**
+
+1. Open the hosted URL in Brave.
+2. Tap the ⋮ menu → **Add to Home screen** (some versions say **Install app**).
+3. Confirm the name and tap **Add**, then launch it from the home screen.
+
+If the icon or name is not picked up, disable Brave Shields for the site and try again.
+
+Brave creates a **home-screen shortcut**, not a true WebAPK: it will not appear under Settings → Apps, its icon gets a small Brave badge, and closing Brave can stop sounds and voice announcements. Countdowns stay accurate because timers use wall-clock end times. Installing once with Chrome or Samsung Internet gives a genuine standalone app if you want that later.
+
+Other browsers: Chrome (with Google Play Services) and Samsung Internet on Samsung phones install a real WebAPK; Firefox for Android uses ⋮ → **Install**; Edge, Opera and Samsung Internet on non-Samsung phones create shortcuts like Brave. In-app browsers (WhatsApp, Facebook, etc.) cannot install PWAs — open the URL in Brave directly.
+
+**Updating after a change**
+
+The service worker caches the app shell. Whenever you change `index.html`, `styles.css`, `app.js`, the manifest or the icons, bump `CACHE_NAME` in `sw.js` (for example `chronogrid-v1` → `chronogrid-v2`) before deploying. Old caches are removed automatically, though users may need to reopen the app once to see the update.
 
 ## Notes
 
 - Audio and voice need a user interaction first (browser autoplay policy); the start/preset click counts.
 - Desktop notifications require permission, requested on first load.
 - Timers use wall-clock end times, so they stay accurate when the tab is inactive.
+- After the first load the app shell is cached by `sw.js`; timer data still lives in `localStorage`, so use Export before clearing site data.
