@@ -15,6 +15,10 @@ let inlineEdit = null;
 let dragId = null;
 let lastSavedSig = new Map();
 
+// Runtime fields change every second; they must not make a timer look "newer"
+// than the same timer on another device, or sync would churn constantly.
+const RUNTIME_FIELDS = ["remaining", "elapsed", "endAt", "running", "finished", "lastTriggered"];
+
 refreshSavedSignatures();
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -78,10 +82,6 @@ function loadState() {
     return migrateState(JSON.parse(raw));
   } catch { return migrateState({}); }
 }
-
-// Runtime fields change every second; they must not make a timer look "newer"
-// than the same timer on another device, or sync would churn constantly.
-const RUNTIME_FIELDS = ["remaining", "elapsed", "endAt", "running", "finished", "lastTriggered"];
 
 function configSignature(item, isTimer) {
   const copy = { ...item };

@@ -1,6 +1,6 @@
 /* ChronoGrid service worker — offline app shell.
    Bump CACHE_NAME whenever a cached file changes so returning users get the update. */
-const CACHE_NAME = "chronogrid-v5";
+const CACHE_NAME = "chronogrid-v6";
 
 const APP_SHELL = [
   "./",
